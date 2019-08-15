@@ -67,6 +67,7 @@ import io.grpc.okhttp.internal.framed.HeadersMode;
 import io.grpc.okhttp.internal.framed.Http2;
 import io.grpc.okhttp.internal.framed.Settings;
 import io.grpc.okhttp.internal.framed.Variant;
+import io.perfmark.PerfMark;
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -1067,9 +1068,7 @@ class OkHttpClientTransport implements ConnectionClientTransport, TransportExcep
     @Override
     public void run() {
       String threadName = Thread.currentThread().getName();
-      if (!GrpcUtil.IS_RESTRICTED_APPENGINE) {
-        Thread.currentThread().setName("OkHttpClientTransport");
-      }
+      Thread.currentThread().setName("OkHttpClientTransport");
       try {
         // Read until the underlying socket closes.
         while (frameReader.nextFrame(this)) {
@@ -1095,10 +1094,7 @@ class OkHttpClientTransport implements ConnectionClientTransport, TransportExcep
           log.log(Level.INFO, "Exception closing frame reader", ex);
         }
         listener.transportTerminated();
-        if (!GrpcUtil.IS_RESTRICTED_APPENGINE) {
-          // Restore the original thread name.
-          Thread.currentThread().setName(threadName);
-        }
+        Thread.currentThread().setName(threadName);
       }
     }
 
@@ -1127,6 +1123,8 @@ class OkHttpClientTransport implements ConnectionClientTransport, TransportExcep
 
         Buffer buf = new Buffer();
         buf.write(in.buffer(), length);
+        PerfMark.event("OkHttpClientTransport$ClientFrameHandler.data",
+            stream.transportState().tag());
         synchronized (lock) {
           stream.transportState().transportDataReceived(buf, inFinished);
         }
@@ -1176,6 +1174,8 @@ class OkHttpClientTransport implements ConnectionClientTransport, TransportExcep
           }
         } else {
           if (failedStatus == null) {
+            PerfMark.event("OkHttpClientTransport$ClientFrameHandler.headers",
+                stream.transportState().tag());
             stream.transportState().transportHeadersReceived(headerBlock, inFinished);
           } else {
             if (!inFinished) {
@@ -1208,10 +1208,17 @@ class OkHttpClientTransport implements ConnectionClientTransport, TransportExcep
       Status status = toGrpcStatus(errorCode).augmentDescription("Rst Stream");
       boolean stopDelivery =
           (status.getCode() == Code.CANCELLED || status.getCode() == Code.DEADLINE_EXCEEDED);
-      finishStream(
-          streamId, status,
-          errorCode == ErrorCode.REFUSED_STREAM ? RpcProgress.REFUSED : RpcProgress.PROCESSED,
-          stopDelivery, null, null);
+      synchronized (lock) {
+        OkHttpClientStream stream = streams.get(streamId);
+        if (stream != null) {
+          PerfMark.event("OkHttpClientTransport$ClientFrameHandler.rstStream",
+              stream.transportState().tag());
+          finishStream(
+              streamId, status,
+              errorCode == ErrorCode.REFUSED_STREAM ? RpcProgress.REFUSED : RpcProgress.PROCESSED,
+              stopDelivery, null, null);
+        }
+      }
     }
 
     @Override

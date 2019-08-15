@@ -214,6 +214,7 @@ class NettyServerHandler extends AbstractNettyHandler {
         new DefaultHttp2LocalFlowController(connection, DEFAULT_WINDOW_UPDATE_RATIO, true));
     frameWriter = new WriteMonitoringFrameWriter(frameWriter, keepAliveEnforcer);
     Http2ConnectionEncoder encoder = new DefaultHttp2ConnectionEncoder(connection, frameWriter);
+    encoder = new Http2ControlFrameLimitEncoder(encoder, 10000);
     Http2ConnectionDecoder decoder = new DefaultHttp2ConnectionDecoder(connection, encoder,
         frameReader);
 
@@ -537,6 +538,8 @@ class NettyServerHandler extends AbstractNettyHandler {
       Attributes attrs, InternalChannelz.Security securityInfo) {
     negotiationAttributes = attrs;
     this.securityInfo = securityInfo;
+    super.handleProtocolNegotiationCompleted(attrs, securityInfo);
+    NettyClientHandler.writeBufferingAndRemove(ctx().channel());
   }
 
   InternalChannelz.Security getSecurityInfo() {
